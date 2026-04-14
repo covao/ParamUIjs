@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParamUI.js Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; background: #f5f5f5; }
+    .main { margin-left: 380px; padding: 76px 24px 24px; min-height: 100vh; transition: margin-left .25s; }
+    @media (max-width: 800px) { .main { margin-left: 0; padding: 70px 16px 16px; } }
+    h1 { margin: 0 0 16px; font-size: 24px; color: #333; }
+    .log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
+    .log h2 { margin: 0 0 12px; font-size: 16px; color: #666; }
+    pre { margin: 0; padding: 12px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; font-size: 13px; overflow: auto; max-height: 400px; }
+  </style>
+</head>
+<body>
+  <div class="main" id="main">
+    <h1>ParamUI.js Demo</h1>
+    <div class="log">
+      <h2>Parameter State</h2>
+      <pre id="log">Loading...</pre>
+    </div>
+  </div>
+
+  <script src="./paramui.js"></script>
+  <script>
+    const params = [
+      ['A1', 'Num A1', 0.5, [0, 1, 0.1]],
+      ['A2', 'Num A2', 50, [0, 100, 5]],
+      ['Options/Flag1', 'Flag 1', true, []],
+      ['Options/Flag2', 'Flag 2', false, []],
+      ['Run', 'Run!', false, 'button'],
+      ['Reset', 'Reset', false, 'button'],
+      ['Options/Select1', 'Select 1', 'Two', ['One', 'Two', 'Three']],
+      ['Options/Mode', 'Mode', 'Normal', ['Normal', 'Advanced', 'Debug']],
+      ['Name1', 'Name 1', 'Taro', []],
+      ['Settings/Theme', 'Theme', 'Light', ['Light', 'Dark', 'Auto']],
+      ['Settings/FontSize', 'Font Size', 14, [10, 24, 1]],
+      ['Settings/Display/Brightness', 'Brightness', 0.8, [0, 1, 0.05]],
+      ['Settings/Display/Contrast', 'Contrast', 1.0, [0.5, 2, 0.1]],
+      ['Files/Input', 'Input File', '', '*.txt'],
+      ['Files/Folder', 'Folder', '', 'folder']
+    ];
+
+    const log = document.getElementById('log');
+    const main = document.getElementById('main');
+    let lastJson = '';
+
+    function refresh(ui, msg) {
+      const json = JSON.stringify(ui.Prm, null, 2);
+      if (json === lastJson && !msg) return;
+      lastJson = json;
+      log.textContent = (msg ? 'Last: ' + msg + '\n\n' : '') + json;
+    }
+
+    const ui = new ParamUI(params, {
+      title: 'ParamUI Demo',
+      onChange: ({variable, value, instance}) => {
+        instance.updatePrm();
+        refresh(instance, variable + ' = ' + JSON.stringify(value));
+      }
+    });
+
+    ui.updatePrm();
+    refresh(ui);
+
+    // Button polling
+    setInterval(() => {
+      ui.updatePrm();
+      if (ui.Prm.Run) {
+        alert('Run button pressed!');
+      }
+      if (ui.Prm.Reset) {
+        ui.setParam('A1', 0.5);
+        ui.setParam('A2', 50);
+        ui.setParam('Name1', 'Taro');
+        refresh(ui, 'Reset to defaults');
+      }
+    }, 100);
+
+    // Adjust margin on panel toggle
+    const origToggle = ui.togglePanel.bind(ui);
+    ui.togglePanel = function() {
+      origToggle();
+      if (window.innerWidth > 800) main.style.marginLeft = this._visible ? '380px' : '0';
+    };
+    const origHide = ui.hidePanel.bind(ui);
+    ui.hidePanel = function() {
+      origHide();
+      if (window.innerWidth > 800) main.style.marginLeft = '0';
+    };
+    const origShow = ui.showPanel.bind(ui);
+    ui.showPanel = function() {
+      origShow();
+      if (window.innerWidth > 800) main.style.marginLeft = '380px';
+    };
+  </script>
+</body>
+</html>
