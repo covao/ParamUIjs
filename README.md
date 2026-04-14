@@ -17,6 +17,7 @@ https://covao.github.io/ParamUIjs/paramui_demo.html
 - Nested parameter structure with tree navigation
 - Collapsible navigation tree with hierarchical folding
 - Toggle panel visibility with hamburger menu
+- Macro support for automation (set, wait, press commands)
 - Mobile-responsive layout
 - Headless mode for testing
 - onChange callback for reactive applications
@@ -80,9 +81,27 @@ Each row: `[variablePath, label, initialValue, spec]`
 | `updatePrm()` | Sync UI state to Prm object, reset buttons |
 | `getParam(path)` | Get value by variable path |
 | `setParam(path, value)` | Set value by variable path |
+| `press(buttonPath)` | Press a button |
+| `runMacro(macro)` | Run macro commands (async) |
 | `navigateTo(path)` | Navigate to a tree group |
 | `togglePanel()` | Toggle panel visibility |
 | `destroy()` | Remove UI and cleanup |
+
+### Macro
+
+Automate parameter operations with macro commands:
+
+```javascript
+// Macro format: commands separated by ';'
+// Use '.' for path hierarchy, enclose strings in single quotes
+await ui.runMacro("A1=0.8; Options.Flag1=true; name='Hello'; wait 0.5; press Run;");
+```
+
+| Command | Format | Example |
+|---------|--------|---------|
+| set | `path=value` | `A1=0.8`, `Options.Flag1=true`, `name='Hello'` |
+| wait | `wait seconds` | `wait 0.5` |
+| press | `press buttonPath` | `press Run`, `press Options.Submit` |
 
 ### Nested Parameters
 

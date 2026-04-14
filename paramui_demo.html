@@ -10,15 +10,49 @@
     .main { margin-left: 380px; padding: 76px 24px 24px; min-height: 100vh; transition: margin-left .25s; }
     @media (max-width: 800px) { .main { margin-left: 0; padding: 70px 16px 16px; } }
     h1 { margin: 0 0 16px; font-size: 24px; color: #333; }
-    .log { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; }
-    .log h2 { margin: 0 0 12px; font-size: 16px; color: #666; }
-    pre { margin: 0; padding: 12px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; font-size: 13px; overflow: auto; max-height: 400px; }
+    .panel { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .panel h2 { margin: 0 0 12px; font-size: 16px; color: #666; }
+    pre { margin: 0; padding: 12px; background: #fafafa; border: 1px solid #eee; border-radius: 6px; font-size: 13px; overflow: auto; max-height: 300px; }
+    .macro-input { width: 100%; padding: 10px 12px; border: 1px solid #c9d1d9; border-radius: 6px; font-family: monospace; font-size: 13px; resize: vertical; min-height: 60px; }
+    .macro-input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+    .macro-row { display: flex; gap: 10px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+    .macro-btn { padding: 10px 20px; border-radius: 6px; border: 1px solid #c9d1d9; background: #2563eb; color: #fff; cursor: pointer; font-size: 14px; font-weight: 500; }
+    .macro-btn:hover { background: #1d4ed8; }
+    .macro-btn:disabled { background: #93c5fd; cursor: not-allowed; }
+    .macro-status { font-size: 13px; color: #666; }
+    .macro-status.running { color: #2563eb; }
+    .macro-status.done { color: #16a34a; }
+    .macro-status.error { color: #dc2626; }
+    .example-macros { margin-top: 12px; }
+    .example-macros label { font-size: 12px; color: #666; display: block; margin-bottom: 6px; }
+    .example-macros select { padding: 8px 10px; border: 1px solid #c9d1d9; border-radius: 6px; font-size: 13px; min-width: 200px; }
   </style>
 </head>
 <body>
   <div class="main" id="main">
     <h1>ParamUI.js Demo</h1>
-    <div class="log">
+    
+    <div class="panel">
+      <h2>Macro</h2>
+      <textarea class="macro-input" id="macroInput" placeholder="Enter macro commands...">A1=0.8; Options.Flag1=true; wait 0.5; press Run;</textarea>
+      <div class="macro-row">
+        <button class="macro-btn" id="macroRun">▶ Run Macro</button>
+        <span class="macro-status" id="macroStatus"></span>
+      </div>
+      <div class="example-macros">
+        <label>Example macros:</label>
+        <select id="macroExamples">
+          <option value="">-- Select --</option>
+          <option value="A1=0.8; Options.Flag1=true; wait 0.5; press Run;">Set values and run</option>
+          <option value="A1=0; wait 0.2; A1=0.2; wait 0.2; A1=0.4; wait 0.2; A1=0.6; wait 0.2; A1=0.8; wait 0.2; A1=1;">Animate slider</option>
+          <option value="Options.Select1='One'; wait 0.3; Options.Select1='Two'; wait 0.3; Options.Select1='Three';">Cycle selector</option>
+          <option value="Name1='Hello'; wait 0.5; Name1='World'; wait 0.5; Name1='ParamUI';">Change text</option>
+          <option value="press Reset;">Press reset</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel">
       <h2>Parameter State</h2>
       <pre id="log">Loading...</pre>
     </div>
@@ -46,6 +80,10 @@
 
     const log = document.getElementById('log');
     const main = document.getElementById('main');
+    const macroInput = document.getElementById('macroInput');
+    const macroRun = document.getElementById('macroRun');
+    const macroStatus = document.getElementById('macroStatus');
+    const macroExamples = document.getElementById('macroExamples');
     let lastJson = '';
 
     function refresh(ui, msg) {
@@ -66,16 +104,64 @@
     ui.updatePrm();
     refresh(ui);
 
+    // Macro execution
+    macroRun.onclick = async () => {
+      const macro = macroInput.value.trim();
+      if (!macro) return;
+      
+      macroRun.disabled = true;
+      macroStatus.textContent = 'Running...';
+      macroStatus.className = 'macro-status running';
+      
+      const success = await ui.runMacro(macro, {
+        onStep: (cmd, i) => {
+          let desc = '';
+          if (cmd.type === 'set') desc = `${cmd.path} = ${cmd.value}`;
+          else if (cmd.type === 'wait') desc = `wait ${cmd.seconds}s`;
+          else if (cmd.type === 'press') desc = `press ${cmd.path}`;
+          macroStatus.textContent = `Step ${i+1}: ${desc}`;
+        },
+        onComplete: () => {
+          macroStatus.textContent = 'Completed!';
+          macroStatus.className = 'macro-status done';
+        },
+        onError: (e) => {
+          macroStatus.textContent = 'Error: ' + e.message;
+          macroStatus.className = 'macro-status error';
+        }
+      });
+      
+      macroRun.disabled = false;
+      setTimeout(() => {
+        if (macroStatus.textContent === 'Completed!') {
+          macroStatus.textContent = '';
+          macroStatus.className = 'macro-status';
+        }
+      }, 2000);
+    };
+    
+    // Example macros
+    macroExamples.onchange = () => {
+      if (macroExamples.value) {
+        macroInput.value = macroExamples.value;
+        macroExamples.value = '';
+      }
+    };
+
     // Button polling
     setInterval(() => {
       ui.updatePrm();
       if (ui.Prm.Run) {
-        alert('Run button pressed!');
+        console.log('Run button pressed!');
+        refresh(ui, 'Run button pressed!');
       }
       if (ui.Prm.Reset) {
         ui.setParam('A1', 0.5);
         ui.setParam('A2', 50);
         ui.setParam('Name1', 'Taro');
+        ui.setParam('Options/Flag1', true);
+        ui.setParam('Options/Flag2', false);
+        ui.setParam('Options/Select1', 'Two');
         refresh(ui, 'Reset to defaults');
       }
     }, 100);

@@ -1,6 +1,6 @@
 /**
  * ParamUI.js - Parameter UI Generator Library
- * @version 2.0.0
+ * @version 2.1.0
  * @license MIT
  * 
  * A browser-side JavaScript library for automatic parameter UI generation.
@@ -53,9 +53,23 @@
  *   ui.updatePrm()              - Sync UI state to Prm object (resets buttons)
  *   ui.getParam('path')         - Get value by variable path
  *   ui.setParam('path', value)  - Set value by variable path
+ *   ui.press('buttonPath')      - Press a button
+ *   ui.runMacro('macro string') - Run macro commands (async)
  *   ui.navigateTo('/Group')     - Navigate to a tree group
  *   ui.togglePanel()            - Show/hide the UI panel
  *   ui.destroy()                - Remove UI and cleanup
+ * 
+ * @example Macro Commands
+ * Macro format: commands separated by ';'
+ * Path notation: use '.' for hierarchy (e.g., Options.Flag1)
+ * String values: enclose in single quotes (e.g., 'Hello')
+ * 
+ *   set:   path=value              e.g., A1=0.8, Options.Flag1=true, name='Hello'
+ *   wait:  wait seconds            e.g., wait 0.5
+ *   press: press buttonPath        e.g., press Run
+ * 
+ * Example macro string:
+ *   "A1=0.8; Options.Flag1=true; name='World'; wait 0.5; press Run;"
  * 
  * @example Headless Mode (for testing)
  *   const ui = new ParamUI(params, { showUI: false });
@@ -84,6 +98,7 @@
   const decimals = s => s>=1?0:(String(s).split('.')[1]||'').length;
   const round = (v,s) => s<=0?v:Number((Math.round(v/s)*s).toFixed(decimals(s)));
   const clamp = (v,min,max) => Math.max(min,Math.min(max,v));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
   
   const widgetType = (val, spec) => {
     if (typeof val==='number' && Array.isArray(spec) && spec.length===3) return 'slider';
@@ -93,6 +108,20 @@
     if (Array.isArray(spec) && spec.length) return 'selector';
     return 'textbox';
   };
+  
+  // Parse value from string (supports 'string' format)
+  const parseVal = s => {
+    s = s.trim();
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+    if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
+    // String enclosed in single quotes
+    if (s.startsWith("'") && s.endsWith("'")) return s.slice(1, -1);
+    return s;
+  };
+  
+  // Convert macro path (dot notation) to internal path (slash notation)
+  const macroPath = p => String(p||'').trim().replace(/\./g, '/');
   
   // DOM helper
   const el = (tag, attrs={}, children=[]) => {
@@ -147,14 +176,16 @@
 .pu-cont{padding:14px;overflow:auto;flex:1;display:flex;flex-direction:column;gap:14px}
 .pu-row{display:flex;flex-direction:column;gap:6px}
 .pu-row label{font-size:13px;font-weight:600;color:#333}
-.pu-row input[type=text],.pu-row input[type=number],.pu-row select{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #c9d1d9;border-radius:6px;font-size:14px;background:#fff}
-.pu-row input:focus,.pu-row select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.pu-row input[type=text],.pu-row input[type=number],.pu-row select,.pu-row textarea{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #c9d1d9;border-radius:6px;font-size:14px;background:#fff}
+.pu-row input:focus,.pu-row select:focus,.pu-row textarea:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+.pu-row textarea{min-height:60px;resize:vertical;font-family:monospace;font-size:12px}
 .pu-inline{display:flex;gap:10px;align-items:center}
 .pu-inline input[type=range]{flex:1;height:6px;-webkit-appearance:none;background:#d1d5db;border-radius:3px;cursor:pointer}
 .pu-inline input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;background:#2563eb;border-radius:50%;cursor:pointer}
 .pu-inline input[type=number]{width:80px;flex-shrink:0}
 .pu-gbtn{padding:10px 16px;border-radius:6px;border:1px solid #c9d1d9;background:#f6f8fa;cursor:pointer;font-size:14px;font-weight:500}
 .pu-gbtn:hover{background:#eef2f6;border-color:#b0b8c1}
+.pu-gbtn:disabled{opacity:.5;cursor:not-allowed}
 .pu-chk{display:flex;align-items:center;gap:10px}
 .pu-chk input{width:18px;height:18px;cursor:pointer;accent-color:#2563eb}
 .pu-chk span{font-size:13px;color:#666}
@@ -199,6 +230,7 @@
       this._els = {};
       this._visible = true;
       this._navOff = false;
+      this._macroRunning = false;
       
       this._build(parameterTable);
       if (this.showUI && typeof document !== 'undefined') this._createUI();
@@ -548,7 +580,7 @@
       this._visible = false;
       if (this._els.root) this._els.root.classList.add('off');
       if (this._els.toggle) this._els.toggle.classList.remove('on');
-      if (this._els.over) this._els.over.classList.remove('on');
+      if (this._els.over) this._els.over.classList.remove('off');
     }
     
     /** Remove UI and cleanup */
@@ -562,6 +594,117 @@
     
     /** Alias for destroy */
     closeUI() { this.destroy(); }
+    
+    // ===== Macro Functions =====
+    
+    /**
+     * Press a button (set state to true and trigger onChange)
+     * @param {string} buttonPath - Variable path of the button
+     * @returns {boolean} Success
+     */
+    press(buttonPath) {
+      const d = this.widgetMap[buttonPath];
+      if (!d || d.wtype !== 'button') return false;
+      this.state[buttonPath] = true;
+      setNest(this.Prm, buttonPath, true);
+      this._sync(d);
+      this._emit(buttonPath, true, d);
+      return true;
+    }
+    
+    /**
+     * Parse macro string into commands
+     * @param {string} macro - Macro string
+     * @returns {Array} Array of command objects
+     */
+    _parseMacro(macro) {
+      const cmds = [];
+      for (const part of String(macro).split(';')) {
+        const cmd = part.trim();
+        if (!cmd) continue;
+        
+        // wait command: "wait 0.5"
+        const waitMatch = cmd.match(/^wait\s+(\d+\.?\d*)$/i);
+        if (waitMatch) {
+          cmds.push({ type: 'wait', seconds: parseFloat(waitMatch[1]) });
+          continue;
+        }
+        
+        // press command: "press Run" or "press Options.Submit"
+        const pressMatch = cmd.match(/^press\s+(.+)$/i);
+        if (pressMatch) {
+          cmds.push({ type: 'press', path: macroPath(pressMatch[1]) });
+          continue;
+        }
+        
+        // set command: "A1=0.8" or "Options.Flag1=true" or "name='Hello'"
+        const setMatch = cmd.match(/^([^=]+)=(.+)$/);
+        if (setMatch) {
+          cmds.push({ type: 'set', path: macroPath(setMatch[1]), value: parseVal(setMatch[2]) });
+          continue;
+        }
+      }
+      return cmds;
+    }
+    
+    /**
+     * Run macro commands
+     * @param {string} macro - Macro string (e.g., "A1=0.8; Options.Flag1=true; wait 0.5; press Run;")
+     * @param {Object} options - Options
+     * @param {Function} options.onStep - Callback after each step (cmd, index)
+     * @param {Function} options.onComplete - Callback when macro completes
+     * @param {Function} options.onError - Callback on error (error, cmd, index)
+     * @returns {Promise<boolean>} Success
+     * 
+     * @example
+     * await ui.runMacro("A1=0.8; Options.Flag1=true; wait 0.5; press Run;");
+     * await ui.runMacro("name='Hello World'; wait 0.5;");
+     */
+    async runMacro(macro, options = {}) {
+      if (this._macroRunning) {
+        console.warn('ParamUI: Macro already running');
+        return false;
+      }
+      
+      const cmds = this._parseMacro(macro);
+      if (!cmds.length) return true;
+      
+      this._macroRunning = true;
+      const { onStep, onComplete, onError } = options;
+      
+      try {
+        for (let i = 0; i < cmds.length; i++) {
+          const cmd = cmds[i];
+          
+          switch (cmd.type) {
+            case 'set':
+              this.setParam(cmd.path, cmd.value);
+              break;
+            case 'wait':
+              await sleep(cmd.seconds * 1000);
+              break;
+            case 'press':
+              this.press(cmd.path);
+              this.updatePrm(); // Process button press immediately
+              break;
+          }
+          
+          if (onStep) onStep(cmd, i);
+        }
+        
+        if (onComplete) onComplete();
+        return true;
+      } catch (e) {
+        console.error('ParamUI macro error:', e);
+        if (onError) onError(e, cmds[0], 0);
+        return false;
+      } finally {
+        this._macroRunning = false;
+      }
+    }
+    
+    /** Check if macro is currently running */
+    get macroRunning() { return this._macroRunning; }
   }
 
   /** Factory function to create ParamUI instance */
